@@ -1,0 +1,26 @@
+<tr id="row-{{ d.id }}">
+  <td><code>{{ d.device_id }}</code></td>
+  <td>{{ d.device_info | tojson }}</td>
+  <td>{{ d.ip }}</td>
+  <td>{{ d.approved_ips | join(", ") or "—" }}</td>
+  <td><span class="badge {{ d.status }}">{{ d.status }}</span></td>
+  <td>{{ d.last_seen }}</td>
+  <td>{{ d.created_at }}</td>
+  <td>
+    {% if d.status != "deauthorized" and d.ip not in d.approved_ips %}
+    <button class="btn ok" hx-post="/dashboard/devices/{{ d.id }}/approve"
+            hx-target="#row-{{ d.id }}" hx-swap="outerHTML">Approve</button>
+    {% elif d.status == "deauthorized" %}
+    <button class="btn ok" hx-post="/dashboard/devices/{{ d.id }}/approve"
+            hx-target="#row-{{ d.id }}" hx-swap="outerHTML">Re-approve</button>
+    {% endif %}
+    {% if d.status != "deauthorized" %}
+    <button class="btn danger" hx-post="/dashboard/devices/{{ d.id }}/deauthorize"
+            hx-target="#row-{{ d.id }}" hx-swap="outerHTML"
+            hx-confirm="Deauthorize this device? It will block future credential fetches.">Deauthorize</button>
+    {% endif %}
+    <button class="btn danger" hx-delete="/dashboard/devices/{{ d.id }}"
+            hx-target="#row-{{ d.id }}" hx-swap="outerHTML"
+            hx-confirm="Permanently delete this device? This cannot be undone.">Delete</button>
+  </td>
+</tr>

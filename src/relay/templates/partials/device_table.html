@@ -1,20 +1,13 @@
 <div id="device-table" hx-get="/dashboard/table" hx-trigger="every 5s" hx-swap="outerHTML">
   <table>
     <thead>
-      <tr><th>Device</th><th>Info</th><th>IP</th><th>Status</th><th>Last seen</th><th>Registered</th></tr>
+      <tr><th>Device</th><th>Info</th><th>IP</th><th>Approved IPs</th><th>Status</th><th>Last seen</th><th>Registered</th><th>Actions</th></tr>
     </thead>
     <tbody>
       {% for d in devices %}
-      <tr>
-        <td><code>{{ d.device_id }}</code></td>
-        <td>{{ d.device_info | tojson }}</td>
-        <td>{{ d.ip }}</td>
-        <td><span class="badge {{ d.status }}">{{ d.status }}</span></td>
-        <td>{{ d.last_seen }}</td>
-        <td>{{ d.created_at }}</td>
-      </tr>
+      {% include "partials/device_row.html" %}
       {% else %}
-      <tr><td colspan="6" class="empty">No devices registered yet.</td></tr>
+      <tr><td colspan="8" class="empty">No devices registered yet.</td></tr>
       {% endfor %}
     </tbody>
   </table>
