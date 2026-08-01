@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}ExifFlow Relay{% endblock %}</title>
+  <script src="https://unpkg.com/htmx.org@2.0.4" defer></script>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; background: #f7f7f8; color: #1c1c1e; }
+    main { max-width: 960px; margin: 2rem auto; padding: 0 1rem; }
+    h1 { font-size: 1.4rem; }
+    table { border-collapse: collapse; width: 100%; background: #fff; border: 1px solid #e3e3e6; }
+    th, td { text-align: left; padding: .55rem .75rem; border-bottom: 1px solid #ececf0; font-size: .85rem; }
+    th { background: #f0f0f3; font-weight: 600; }
+    code { background: #eef0f3; padding: .1rem .3rem; border-radius: 3px; font-size: .78rem; }
+    .counts { margin-bottom: 1rem; color: #555; font-size: .9rem; }
+    .badge { display: inline-block; padding: .1rem .55rem; border-radius: 999px; font-size: .75rem; font-weight: 600; }
+    .pending { background: #fff3cd; color: #7a5b00; }
+    .approved { background: #d1e7dd; color: #0f5132; }
+    .deauthorized { background: #f8d7da; color: #842029; }
+    .empty { padding: 2rem; text-align: center; color: #888; }
+  </style>
+</head>
+<body>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}Relay — Devices{% endblock %}
+{% block content %}
+<h1>ExifFlow Relay</h1>
+<p class="counts">{{ counts.pending }} pending &middot; {{ counts.approved }} approved &middot; {{ counts.total }} total</p>
+{% include "partials/device_table.html" %}
+{% endblock %}
