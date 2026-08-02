@@ -164,6 +164,91 @@ def _bearer_token(request: Request) -> str | None:
     return None
 
 
+def _storage_view(creds: dict | None) -> dict:
+    if not creds:
+        return {"backend_type": "ftps"}
+    backend = creds.get("backend")
+    if isinstance(backend, dict):
+        view = dict(backend)
+        view["backend_type"] = backend.get("type", "ftps")
+        return view
+    view = dict(creds)
+    view["backend_type"] = "ftps"
+    return view
+
+
+def _existing_value(existing: dict | None, key: str):
+    if not existing:
+        return None
+    backend = existing.get("backend")
+    if isinstance(backend, dict):
+        return backend.get(key, existing.get(key))
+    return existing.get(key)
+
+
+def _ftps_from_form(form, existing: dict | None) -> dict:
+    protocol = str(form.get("protocol", "ftps")).strip().lower()
+    if protocol not in ("ftp", "ftps"):
+        raise HTTPException(status_code=400, detail="protocol must be ftp or ftps")
+    host = str(form.get("host", "")).strip()
+    user = str(form.get("user", "")).strip()
+    if not host or not user:
+        raise HTTPException(status_code=400, detail="host and user are required")
+    try:
+        port = int(str(form.get("port") or (990 if protocol == "ftps" else 21)))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid port")
+    password = str(form.get("password", "")) or _existing_value(existing, "password") or ""
+    root = str(form.get("root", "")).strip() or None
+    ca_cert = str(form.get("ca_cert", "")).strip() or _existing_value(existing, "ca_cert") or None
+    return {
+        "version": 1,
+        "backend": {
+            "type": "ftps",
+            "protocol": protocol,
+            "host": host,
+            "port": port,
+            "user": user,
+            "password": password,
+            "root": root,
+            "ca_cert": ca_cert,
+        },
+    }
+
+
+def _s3_from_form(form, existing: dict | None) -> dict:
+    endpoint = str(form.get("endpoint", "")).strip()
+    bucket = str(form.get("bucket", "")).strip()
+    access_key_id = str(form.get("access_key_id", "")).strip()
+    if not endpoint or not bucket or not access_key_id:
+        raise HTTPException(status_code=400, detail="endpoint, bucket and access key id are required")
+    if not endpoint.startswith("https://"):
+        raise HTTPException(status_code=400, detail="endpoint must be https (S3 over TLS is mandatory)")
+    secret_access_key = str(form.get("secret_access_key", "")) or _existing_value(existing, "secret_access_key") or ""
+    if not secret_access_key:
+        raise HTTPException(status_code=400, detail="secret access key is required")
+    region = str(form.get("region", "")).strip() or None
+    session_token = str(form.get("session_token", "")).strip() or None
+    path_style = form.get("path_style") is not None
+    root = str(form.get("root", "")).strip() or None
+    ca_cert = str(form.get("ca_cert", "")).strip() or _existing_value(existing, "ca_cert") or None
+    return {
+        "version": 1,
+        "backend": {
+            "type": "s3",
+            "endpoint": endpoint,
+            "region": region,
+            "bucket": bucket,
+            "path_style": path_style,
+            "access_key_id": access_key_id,
+            "secret_access_key": secret_access_key,
+            "session_token": session_token,
+            "root": root,
+            "ca_cert": ca_cert,
+        },
+    }
+
+
 def create_ui_app(
     config: Config,
     db: aiosqlite.Connection,
@@ -187,42 +272,26 @@ def create_ui_app(
         return TEMPLATES.TemplateResponse(
             request,
             "storage.html",
-            {"creds": creds or {}, "error": error, "notice": None, "config_toml": config.toml},
+            {"creds": _storage_view(creds), "error": error, "notice": None, "config_toml": config.toml},
         )
 
     @app.post("/dashboard/storage", response_class=HTMLResponse)
     async def storage_save(request: Request):
         form = await request.form()
-        protocol = str(form.get("protocol", "ftp")).strip().lower()
-        if protocol not in ("ftp", "ftps"):
-            raise HTTPException(status_code=400, detail="protocol must be ftp or ftps")
-        host = str(form.get("host", "")).strip()
-        user = str(form.get("user", "")).strip()
-        if not host or not user:
-            raise HTTPException(status_code=400, detail="host and user are required")
-        try:
-            port = int(str(form.get("port") or (990 if protocol == "ftps" else 21)))
-        except ValueError:
-            raise HTTPException(status_code=400, detail="invalid port")
+        backend = str(form.get("backend", "ftps")).strip().lower()
         existing, _ = vault.load_storage(config.toml, master_key)
-        password = str(form.get("password", "")) or (existing or {}).get("password", "")
-        root = str(form.get("root", "")).strip() or None
-        ca_cert = str(form.get("ca_cert", "")).strip() or None
-        creds = {
-            "protocol": protocol,
-            "host": host,
-            "port": port,
-            "user": user,
-            "password": password,
-            "root": root,
-            "ca_cert": ca_cert,
-        }
+        if backend == "ftps":
+            creds = _ftps_from_form(form, existing)
+        elif backend == "s3":
+            creds = _s3_from_form(form, existing)
+        else:
+            raise HTTPException(status_code=400, detail="backend must be ftps or s3")
         if master_key is None:
             return TEMPLATES.TemplateResponse(
                 request,
                 "storage.html",
                 {
-                    "creds": creds,
+                    "creds": _storage_view(creds),
                     "error": "RELAY_MASTER_KEY (or file) missing — set it and restart the relay",
                     "notice": None, "config_toml": config.toml,
                 },
@@ -231,7 +300,7 @@ def create_ui_app(
         return TEMPLATES.TemplateResponse(
             request,
             "storage.html",
-            {"creds": creds, "error": None, "notice": "storage credentials saved", "config_toml": config.toml},
+            {"creds": _storage_view(creds), "error": None, "notice": "storage credentials saved", "config_toml": config.toml},
         )
 
     @app.post("/dashboard/storage/clear", response_class=HTMLResponse)
@@ -240,7 +309,7 @@ def create_ui_app(
         return TEMPLATES.TemplateResponse(
             request,
             "storage.html",
-            {"creds": {}, "error": None, "notice": "storage config cleared", "config_toml": config.toml},
+            {"creds": _storage_view({}), "error": None, "notice": "storage config cleared", "config_toml": config.toml},
         )
 
     @app.get("/dashboard/table", response_class=HTMLResponse)
@@ -374,7 +443,13 @@ def run() -> None:
         config = load_config()
         sub = args[1] if len(args) > 1 else "show"
         if sub == "set":
-            vault.storage_set(config.toml)
+            if "--from-json" in args:
+                idx = args.index("--from-json")
+                if idx + 1 >= len(args):
+                    sys.exit("--from-json requires a file path")
+                vault.storage_set_from_json(config.toml, args[idx + 1])
+            else:
+                vault.storage_set(config.toml)
         elif sub == "show":
             vault.storage_show(config.toml)
         elif sub == "clear":

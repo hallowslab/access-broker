@@ -8,25 +8,62 @@
 {% if notice %}<p class="notice ok">{{ notice }}</p>{% endif %}
 
 <form method="post" action="/dashboard/storage" class="cred-form">
-  <label>Protocol
-    <select name="protocol">
-      <option value="ftp" {% if creds.protocol == "ftp" %}selected{% endif %}>FTP</option>
-      <option value="ftps" {% if creds.protocol == "ftps" %}selected{% endif %}>FTPS</option>
+  <label>Backend
+    <select name="backend" id="backend">
+      <option value="ftps" {% if creds.backend_type == "ftps" %}selected{% endif %}>FTPS</option>
+      <option value="s3" {% if creds.backend_type == "s3" %}selected{% endif %}>S3</option>
     </select>
   </label>
-  <label>Host
-    <input type="text" name="host" value="{{ creds.host | default('') }}" required>
-  </label>
-  <label>Port
-    <input type="number" name="port" value="{{ creds.port | default('') }}">
-  </label>
-  <label>User
-    <input type="text" name="user" value="{{ creds.user | default('') }}" required>
-  </label>
-  <label>Password
-    <input type="password" name="password" placeholder="blank = unchanged">
-  </label>
-  <label>Root dir (optional)
+
+  <fieldset id="ftps-fields">
+    <legend>FTPS</legend>
+    <label>Protocol
+      <select name="protocol">
+        <option value="ftp" {% if creds.protocol == "ftp" %}selected{% endif %}>FTP</option>
+        <option value="ftps" {% if creds.protocol == "ftps" or creds.backend_type == "ftps" %}selected{% endif %}>FTPS</option>
+      </select>
+    </label>
+    <label>Host
+      <input type="text" name="host" value="{{ creds.host | default('') }}" required>
+    </label>
+    <label>Port
+      <input type="number" name="port" value="{{ creds.port | default('') }}">
+    </label>
+    <label>User
+      <input type="text" name="user" value="{{ creds.user | default('') }}" required>
+    </label>
+    <label>Password
+      <input type="password" name="password" placeholder="blank = unchanged">
+    </label>
+  </fieldset>
+
+  <fieldset id="s3-fields" style="display:none">
+    <legend>S3</legend>
+    <label>Endpoint
+      <input type="text" name="endpoint" value="{{ creds.endpoint | default('') }}" placeholder="https://minio.local:9000" required>
+    </label>
+    <label>Region (optional)
+      <input type="text" name="region" value="{{ creds.region | default('') }}">
+    </label>
+    <label>Bucket
+      <input type="text" name="bucket" value="{{ creds.bucket | default('') }}" required>
+    </label>
+    <label class="check">
+      <input type="checkbox" name="path_style" {% if creds.path_style %}checked{% endif %}>
+      Path-style endpoint
+    </label>
+    <label>Access key ID
+      <input type="text" name="access_key_id" value="{{ creds.access_key_id | default('') }}" required>
+    </label>
+    <label>Secret access key
+      <input type="password" name="secret_access_key" placeholder="blank = unchanged">
+    </label>
+    <label>Session token (optional)
+      <input type="password" name="session_token" value="{{ creds.session_token | default('') }}">
+    </label>
+  </fieldset>
+
+  <label>Root / object prefix (optional)
     <input type="text" name="root" value="{{ creds.root | default('') }}" placeholder="e.g. /photos">
   </label>
   <label>CA cert PEM (self-signed trust, optional)
@@ -36,6 +73,21 @@
   <button class="btn danger" type="button" hx-post="/dashboard/storage/clear"
           hx-confirm="Clear storage config? Fetch will return 503 until you re-enter credentials.">Clear</button>
 </form>
+
+<script>
+(function () {
+  var sel = document.getElementById("backend");
+  var ftps = document.getElementById("ftps-fields");
+  var s3 = document.getElementById("s3-fields");
+  function toggle() {
+    var isS3 = sel.value === "s3";
+    ftps.style.display = isS3 ? "none" : "";
+    s3.style.display = isS3 ? "" : "none";
+  }
+  sel.addEventListener("change", toggle);
+  toggle();
+})();
+</script>
 
 <p class="hint">Stored encrypted at rest in <code>{{ config_toml }}</code> under <code>[storage]</code>.</p>
 {% endblock %}
