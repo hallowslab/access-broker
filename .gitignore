@@ -2,7 +2,7 @@
 *.pyc
 *.db
 .uv/
-relay.toml
+access-broker.toml
 .env
 data/
 

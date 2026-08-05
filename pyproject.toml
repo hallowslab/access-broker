@@ -1,5 +1,5 @@
 [project]
-name = "relay"
+name = "access-broker"
 version = "0.1.0"
 description = "ExifFlow replication authorization gateway"
 requires-python = ">=3.11"
@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.scripts]
-relay = "relay.main:run"
+access-broker = "access_broker.main:run"
 
 [tool.uv]
 package = true
