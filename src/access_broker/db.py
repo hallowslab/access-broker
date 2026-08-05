@@ -3,6 +3,8 @@ from datetime import datetime, timezone
 
 import aiosqlite
 
+from . import audit
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS devices (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -32,6 +34,7 @@ async def init_db(path: str) -> None:
             await db.execute(
                 "ALTER TABLE devices ADD COLUMN approved_ips TEXT NOT NULL DEFAULT '[]'"
             )
+        await audit.init_audit_db(db)
         await db.commit()
     finally:
         await db.close()

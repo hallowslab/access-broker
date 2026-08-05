@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}ExifFlow Relay{% endblock %}</title>
+  <title>{% block title %}ExifFlow Access Broker{% endblock %}</title>
   <script src="https://unpkg.com/htmx.org@2.0.4" defer></script>
   <style>
     body { font-family: system-ui, sans-serif; margin: 0; background: #f7f7f8; color: #1c1c1e; }
@@ -25,7 +25,7 @@
     .btn.danger { background: #f8d7da; color: #842029; border-color: #f0b6bb; }
     .btn.danger:hover { background: #f2c0c4; }
     .cred-form label { display: block; margin: .6rem 0 .2rem; font-size: .8rem; color: #555; }
-    .cred-form input, .cred-form select { width: 100%; box-sizing: border-box; padding: .45rem .6rem; border: 1px solid #ccc; border-radius: 5px; font-size: .9rem; }
+    .cred-form input, .cred-form select, .cred-form textarea { width: 100%; box-sizing: border-box; padding: .45rem .6rem; border: 1px solid #ccc; border-radius: 5px; font-size: .9rem; font-family: inherit; }
     .cred-form button { margin-top: 1rem; }
     .notice { padding: .6rem .8rem; border-radius: 5px; font-size: .85rem; margin-bottom: .8rem; }
     .notice.ok { background: #d1e7dd; color: #0f5132; }

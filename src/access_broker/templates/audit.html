@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+
+{% block title %}Audit Log{% endblock %}
+
+{% block content %}
+<h1>Audit Log</h1>
+
+<div style="margin-bottom: 20px;">
+  <a href="/dashboard" style="text-decoration: none; color: #007bff;">← Back to Dashboard</a>
+</div>
+
+<form method="get" style="margin-bottom: 20px; display: flex; gap: 10px; align-items: end;">
+  <div>
+    <label style="display: block; margin-bottom: 5px;">Event Type:</label>
+    <select name="event_type" style="padding: 5px;">
+      <option value="">All Events</option>
+      <option value="device_register" {% if event_type == 'device_register' %}selected{% endif %}>Device Register</option>
+      <option value="challenge_success" {% if event_type == 'challenge_success' %}selected{% endif %}>Challenge Success</option>
+      <option value="verify_success" {% if event_type == 'verify_success' %}selected{% endif %}>Verify Success</option>
+      <option value="verify_failure" {% if event_type == 'verify_failure' %}selected{% endif %}>Verify Failure</option>
+      <option value="fetch_success" {% if event_type == 'fetch_success' %}selected{% endif %}>Fetch Success</option>
+      <option value="fetch_failure" {% if event_type == 'fetch_failure' %}selected{% endif %}>Fetch Failure</option>
+      <option value="register_rate_limit" {% if event_type == 'register_rate_limit' %}selected{% endif %}>Rate Limit</option>
+    </select>
+  </div>
+  <div>
+    <label style="display: block; margin-bottom: 5px;">IP Address:</label>
+    <input type="text" name="ip" value="{{ ip or '' }}" placeholder="Filter by IP" style="padding: 5px;">
+  </div>
+  <div>
+    <label style="display: block; margin-bottom: 5px;">Limit:</label>
+    <input type="number" name="limit" value="{{ limit }}" min="10" max="1000" style="padding: 5px; width: 80px;">
+  </div>
+  <button type="submit" style="padding: 5px 15px;">Filter</button>
+</form>
+
+<table style="width: 100%; border-collapse: collapse;">
+  <thead>
+    <tr style="background: #f5f5f5;">
+      <th style="padding: 10px; text-align: left; border: 1px solid #ddd;">Timestamp</th>
+      <th style="padding: 10px; text-align: left; border: 1px solid #ddd;">Event</th>
+      <th style="padding: 10px; text-align: left; border: 1px solid #ddd;">IP</th>
+      <th style="padding: 10px; text-align: left; border: 1px solid #ddd;">Device ID</th>
+      <th style="padding: 10px; text-align: left; border: 1px solid #ddd;">Severity</th>
+      <th style="padding: 10px; text-align: left; border: 1px solid #ddd;">Details</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for entry in entries %}
+    <tr style="border-bottom: 1px solid #ddd;">
+      <td style="padding: 10px;">{{ entry.timestamp }}</td>
+      <td style="padding: 10px;">
+        <span style="font-family: monospace; font-size: 0.9em;">{{ entry.event_type }}</span>
+      </td>
+      <td style="padding: 10px; font-family: monospace;">{{ entry.ip }}</td>
+      <td style="padding: 10px; font-family: monospace;">{{ entry.device_id or '—' }}</td>
+      <td style="padding: 10px;">
+        {% if entry.severity == 'error' %}
+        <span style="color: #dc3545; font-weight: bold;">{{ entry.severity }}</span>
+        {% elif entry.severity == 'warning' %}
+        <span style="color: #ffc107;">{{ entry.severity }}</span>
+        {% else %}
+        <span style="color: #28a745;">{{ entry.severity }}</span>
+        {% endif %}
+      </td>
+      <td style="padding: 10px; font-family: monospace; font-size: 0.85em;">
+        <details>
+          <summary style="cursor: pointer;">Show</summary>
+          <pre style="margin: 5px 0; white-space: pre-wrap;">{{ entry.details }}</pre>
+        </details>
+      </td>
+    </tr>
+    {% else %}
+    <tr>
+      <td colspan="6" style="padding: 20px; text-align: center; color: #666;">No audit entries found</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<div style="margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 5px;">
+  <h3 style="margin-top: 0;">Fail2ban Integration</h3>
+  <p style="margin: 5px 0; font-size: 0.9em;">
+    Audit logs are written to <code style="background: #e9ecef; padding: 2px 5px; border-radius: 3px;">{{ audit_log_file }}</code> in fail2ban-compatible format.
+  </p>
+  <p style="margin: 5px 0; font-size: 0.9em;">
+    Example fail2ban filter for <code style="background: #e9ecef; padding: 2px 5px; border-radius: 3px;">verify_failure</code>:
+  </p>
+  <pre style="background: #e9ecef; padding: 10px; border-radius: 3px; font-size: 0.85em; overflow-x: auto;">
+[Definition]
+failregex = ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} &lt;HOST&gt; verify_failure .*$
+ignoreregex =
+  </pre>
+</div>
+{% endblock %}

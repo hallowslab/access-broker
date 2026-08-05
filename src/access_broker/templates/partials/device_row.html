@@ -2,7 +2,19 @@
   <td><code>{{ d.device_id }}</code></td>
   <td>{{ d.device_info | tojson }}</td>
   <td>{{ d.ip }}</td>
-  <td>{{ d.approved_ips | join(", ") or "—" }}</td>
+  <td>
+    {{ d.approved_ips | join(", ") or "—" }}
+    {% if d.ip_history | length > 0 %}
+    <details style="margin-top: 4px;">
+      <summary style="cursor: pointer; font-size: 0.85em; color: #666;">IP History ({{ d.ip_history | length }})</summary>
+      <div style="margin-top: 4px; padding: 4px; background: #f5f5f5; border-radius: 3px; font-size: 0.85em;">
+        {% for ip in d.ip_history %}
+        <div>{{ ip }}</div>
+        {% endfor %}
+      </div>
+    </details>
+    {% endif %}
+  </td>
   <td><span class="badge {{ d.status }}">{{ d.status }}</span></td>
   <td>{{ d.last_seen }}</td>
   <td>{{ d.created_at }}</td>

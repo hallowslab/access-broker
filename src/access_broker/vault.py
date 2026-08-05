@@ -9,10 +9,10 @@ from cryptography.fernet import Fernet, InvalidToken
 
 
 def load_master_key() -> bytes | None:
-    raw = os.environ.get("RELAY_MASTER_KEY")
+    raw = os.environ.get("BROKER_MASTER_KEY")
     if raw:
         return raw.strip().encode()
-    key_file = os.environ.get("RELAY_MASTER_KEY_FILE")
+    key_file = os.environ.get("BROKER_MASTER_KEY_FILE")
     if key_file:
         path = Path(key_file)
         if path.exists():
@@ -43,7 +43,7 @@ def load_storage(toml_path: str, master_key: bytes | None) -> tuple[dict | None,
     if not token:
         return None, "storage not configured"
     if master_key is None:
-        return None, "RELAY_MASTER_KEY (or RELAY_MASTER_KEY_FILE) missing"
+        return None, "BROKER_MASTER_KEY (or BROKER_MASTER_KEY_FILE) missing"
     try:
         creds = json.loads(Fernet(master_key).decrypt(token.encode()))
     except (InvalidToken, ValueError):
@@ -55,8 +55,8 @@ def storage_set(toml_path: str) -> None:
     master_key = load_master_key()
     if master_key is None:
         sys.exit(
-            "no master key set — set RELAY_MASTER_KEY or RELAY_MASTER_KEY_FILE "
-            "(generate one with: relay keygen)"
+            "no master key set — set BROKER_MASTER_KEY or BROKER_MASTER_KEY_FILE "
+            "(generate one with: access-broker keygen)"
         )
     backend = input("backend (ftps/s3) [ftps]: ").strip().lower() or "ftps"
     if backend == "ftps":
@@ -73,8 +73,8 @@ def storage_set_from_json(toml_path: str, data_path: str) -> None:
     master_key = load_master_key()
     if master_key is None:
         sys.exit(
-            "no master key set — set RELAY_MASTER_KEY or RELAY_MASTER_KEY_FILE "
-            "(generate one with: relay keygen)"
+            "no master key set — set BROKER_MASTER_KEY or BROKER_MASTER_KEY_FILE "
+            "(generate one with: access-broker keygen)"
         )
     try:
         creds = json.loads(Path(data_path).read_text())

@@ -1,4 +1,4 @@
-# ExifFlow Relay
+# ExifFlow Access Broker
 
 Zero-trust replication gateway for the ExifFlow pipeline. Devices register
 with an Ed25519 key, an admin approves them on a dashboard, and approved
@@ -10,8 +10,8 @@ Built with Python, FastAPI, SQLite (aiosqlite), and Jinja2/HTMX.
 ## Architecture
 
 ```
-[ rftps / app-gui clients ]   →  Relay API   (0.0.0.0:8700)
-[ admin browser          ]   →  Relay UI     (127.0.0.1:8701)
+[ rftps / app-gui clients ]   →  Broker API   (0.0.0.0:8700)
+[ admin browser          ]   →  Broker UI     (127.0.0.1:8701)
 ```
 
 * **API app** — client-facing: `register`, `status` (long-poll), `challenge`,
@@ -19,7 +19,7 @@ Built with Python, FastAPI, SQLite (aiosqlite), and Jinja2/HTMX.
 * **UI app** — loopback-only dashboard: approve/deauthorize devices, set
   storage credentials, view status.
 * **Storage vault** — FTP/FTPS target credentials encrypted (Fernet) with a
-  master key and stored in `data/relay.toml`.
+  master key and stored in `data/access-broker.toml`.
 
 ## Prerequisites
 
@@ -29,7 +29,7 @@ Built with Python, FastAPI, SQLite (aiosqlite), and Jinja2/HTMX.
 ## Setup
 
 ```bash
-cd relay
+cd access-broker
 cp .env.example .env
 uv sync                # or: pip install -e .
 ```
@@ -38,30 +38,30 @@ uv sync                # or: pip install -e .
 
 | Variable | Default | Notes |
 | -------- | ------- | ----- |
-| `RELAY_HOST` / `RELAY_PORT` | `0.0.0.0` / `8700` | Client-facing API |
-| `RELAY_DB` | `data/relay.db` | SQLite database |
-| `RELAY_TOML` | `data/relay.toml` | Encrypted storage credentials |
-| `RELAY_TRUST_PROXY` | `0` | `1` if behind a reverse proxy (honors `X-Forwarded-For`) |
-| `RELAY_UI_ENABLED` | `1` | Admin dashboard Enabled |
-| `RELAY_UI_HOST` | `127.0.0.1` | Admin dashboard Host |
-| `RELAY_UI_PORT` | `8701` | Admin dashboard Port |
-| `RELAY_MASTER_KEY` | — | Fernet key for encrypting storage credentials |
-| `RELAY_MASTER_KEY_FILE` | — | Alternative: path to a file containing the key |
+| `BROKER_HOST` / `BROKER_PORT` | `0.0.0.0` / `8700` | Client-facing API |
+| `BROKER_DB` | `data/access-broker.db` | SQLite database |
+| `BROKER_TOML` | `data/access-broker.toml` | Encrypted storage credentials |
+| `BROKER_TRUST_PROXY` | `0` | `1` if behind a reverse proxy (honors `X-Forwarded-For`) |
+| `BROKER_UI_ENABLED` | `1` | Admin dashboard Enabled |
+| `BROKER_UI_HOST` | `127.0.0.1` | Admin dashboard Host |
+| `BROKER_UI_PORT` | `8701` | Admin dashboard Port |
+| `BROKER_MASTER_KEY` | — | Fernet key for encrypting storage credentials |
+| `BROKER_MASTER_KEY_FILE` | — | Alternative: path to a file containing the key |
 
 ### Generate the master key
 
 ```bash
-uv run relay keygen
+uv run access-broker keygen
 ```
 
-Paste the output into `.env` as `RELAY_MASTER_KEY` (or write it to a file and
-set `RELAY_MASTER_KEY_FILE`). Without it the dashboard can still manage
+Paste the output into `.env` as `BROKER_MASTER_KEY` (or write it to a file and
+set `BROKER_MASTER_KEY_FILE`). Without it the dashboard can still manage
 devices, but storage credentials cannot be saved.
 
-## Run the relay
+## Run the broker
 
 ```bash
-uv run relay serve
+uv run access-broker serve
 ```
 
 * API: `http://<host>:8700` (clients)
@@ -73,9 +73,9 @@ The replication target (where uploaded files are pushed to) is set on the
 dashboard at `http://127.0.0.1:8701/dashboard/storage`, or via CLI:
 
 ```bash
-uv run relay storage set       # interactive prompts
-uv run relay storage show      # shows saved values (password redacted)
-uv run relay storage clear
+uv run access-broker storage set       # interactive prompts
+uv run access-broker storage show      # shows saved values (password redacted)
+uv run access-broker storage clear
 ```
 
 Prompts: `protocol` (ftp/ftps), `host`, `port`, `user`, `password`, `root`
@@ -88,12 +88,12 @@ FTPS target).
 
 ## Client setup
 
-Once the relay is running:
+Once the broker is running:
 
-1. **rftps**: run `rftps relay init` to generate `bg.json`, then start the
+1. **rftps**: run `rftps broker init` to generate `bg.json`, then start the
    server with `--config bg.json`. See [`../rftps/README.md`](../rftps/README.md).
-2. **app-gui**: set the relay URL + device name in
-   **Settings → Replication (Relay)** and click **REGISTER DEVICE**. See
+2. **app-gui**: set the broker URL + device name in
+   **Settings → Replication (Broker)** and click **REGISTER DEVICE**. See
    [`../app-gui/README.md`](../app-gui/README.md).
 3. Approve the pending device in the dashboard — it then fetches the storage
    credentials on first upload.
@@ -107,7 +107,7 @@ Once the relay is running:
 * Credentials are fetched with a short-lived session token (challenge →
   Ed25519 signature → token) and held in client RAM only.
 * The dashboard is loopback-bound by default. To expose it, set
-  `RELAY_UI_HOST` and put it behind an authenticated reverse proxy.
+  `BROKER_UI_HOST` and put it behind an authenticated reverse proxy.
 
 ## Endpoints
 

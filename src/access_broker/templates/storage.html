@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Relay — Storage{% endblock %}
+{% block title %}Access Broker — Storage{% endblock %}
 {% block content %}
 <h1>Storage credentials</h1>
 <p class="counts"><a href="/">← devices</a></p>
@@ -49,8 +49,8 @@
       <input type="text" name="bucket" value="{{ creds.bucket | default('') }}" required>
     </label>
     <label class="check">
-      <input type="checkbox" name="path_style" {% if creds.path_style %}checked{% endif %}>
-      Path-style endpoint
+      <input type="checkbox" name="path_style" {% if creds.path_style != False %}checked{% endif %}>
+      Path-style endpoint (recommended; required for MinIO/Garage/Ceph)
     </label>
     <label>Access key ID
       <input type="text" name="access_key_id" value="{{ creds.access_key_id | default('') }}" required>
@@ -59,7 +59,16 @@
       <input type="password" name="secret_access_key" placeholder="blank = unchanged">
     </label>
     <label>Session token (optional)
-      <input type="password" name="session_token" value="{{ creds.session_token | default('') }}">
+      <input type="password" name="session_token" placeholder="blank = unchanged">
+    </label>
+    <label>Multipart threshold (bytes, optional)
+      <input type="number" name="multipart_threshold_bytes" min="5242880" step="1048576"
+             value="{{ creds.multipart_threshold_bytes | default('') }}"
+             placeholder="default: 8 MiB; objects larger use multipart upload">
+    </label>
+    <label class="check">
+      <input type="checkbox" name="immutable_naming" {% if creds.immutable_naming %}checked{% endif %}>
+      Immutable naming (prepend UUID to filenames to prevent overwrites)
     </label>
   </fieldset>
 
@@ -70,19 +79,27 @@
     <textarea name="ca_cert" rows="6" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----">{{ creds.ca_cert | default('') }}</textarea>
   </label>
   <button class="btn ok" type="submit">Save</button>
-  <button class="btn danger" type="button" hx-post="/dashboard/storage/clear"
-          hx-confirm="Clear storage config? Fetch will return 503 until you re-enter credentials.">Clear</button>
+  <button class="btn danger" type="submit" form="clear-form"
+          onclick="return confirm('Clear storage config? Fetch will return 503 until you re-enter credentials.')">Clear</button>
 </form>
+<form id="clear-form" method="post" action="/dashboard/storage/clear" style="display:none"></form>
 
 <script>
 (function () {
   var sel = document.getElementById("backend");
   var ftps = document.getElementById("ftps-fields");
   var s3 = document.getElementById("s3-fields");
+  function setDisabled(fieldset, disabled) {
+    fieldset.querySelectorAll("input, select, textarea").forEach(function (el) {
+      el.disabled = disabled;
+    });
+  }
   function toggle() {
     var isS3 = sel.value === "s3";
     ftps.style.display = isS3 ? "none" : "";
     s3.style.display = isS3 ? "" : "none";
+    setDisabled(ftps, isS3);
+    setDisabled(s3, !isS3);
   }
   sel.addEventListener("change", toggle);
   toggle();

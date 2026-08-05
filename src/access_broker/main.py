@@ -9,11 +9,13 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
+from . import audit
 from . import db as dblib
 from . import vault
 from .auth import AuthStore
 from .config import Config, load_config
 from .models import ChallengeRequest, RegisterRequest, VerifyRequest, to_view
+from .ratelimit import RateLimiter, RateLimitConfig
 
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -22,6 +24,9 @@ VALID_HEX = set("0123456789abcdef")
 
 LONG_POLL_TIMEOUT = 60
 CLOCK_SKEW = 120
+
+# Global rate limiter instance
+_rate_limiter = RateLimiter(RateLimitConfig())
 
 
 def _validate_public_key(public_key: str) -> str:
@@ -52,18 +57,35 @@ def create_api_app(
     auth: AuthStore,
     master_key: bytes | None,
 ) -> FastAPI:
-    app = FastAPI(title="ExifFlow Relay API")
+    app = FastAPI(title="ExifFlow Broker API")
 
     @app.post("/api/devices/register", status_code=201)
     async def register(req: RegisterRequest, request: Request):
         key = _validate_public_key(req.public_key)
         ip = _client_ip(request, config.trust_proxy)
+        
+        # Rate limit check
+        allowed, error = _rate_limiter.check_register(ip)
+        if not allowed:
+            await audit.log_event(
+                db, "register_rate_limit", ip, key, key[:16],
+                {"reason": error}, "warning", Path(config.audit_log)
+            )
+            raise HTTPException(status_code=429, detail=error)
+        
         status, _ = await dblib.register_device(db, key, req.device_info, ip)
         message = (
             "device registered, pending approval"
             if status == "pending"
             else "device re-registered"
         )
+        
+        # Audit log
+        await audit.log_event(
+            db, "device_register", ip, key, key[:16],
+            {"status": status, "device_info": req.device_info}, "info", Path(config.audit_log)
+        )
+        
         return {
             "device_id": key[:16],
             "public_key": key,
@@ -88,12 +110,34 @@ def create_api_app(
         return _status_response(device, "pending", ip)
 
     @app.post("/api/auth/challenge", status_code=200)
-    async def challenge(req: ChallengeRequest):
+    async def challenge(req: ChallengeRequest, request: Request):
         key = _validate_public_key(req.public_key)
+        ip = _client_ip(request, config.trust_proxy)
+        
+        # Rate limit check
+        allowed, error = _rate_limiter.check_challenge(ip)
+        if not allowed:
+            await audit.log_event(
+                db, "challenge_rate_limit", ip, key, key[:16],
+                {"reason": error}, "warning", Path(config.audit_log)
+            )
+            raise HTTPException(status_code=429, detail=error)
+        
         device = await dblib.get_device(db, key)
         if device is None:
+            await audit.log_event(
+                db, "challenge_failure", ip, key, key[:16],
+                {"reason": "device not registered"}, "warning", Path(config.audit_log)
+            )
             raise HTTPException(status_code=404, detail="device not registered")
+        
         nonce, ttl = auth.create_challenge(key)
+        
+        await audit.log_event(
+            db, "challenge_success", ip, key, key[:16],
+            {"ttl": ttl}, "info", Path(config.audit_log)
+        )
+        
         return {"challenge": nonce, "expires_in": ttl}
 
     @app.post("/api/auth/verify", status_code=200)
@@ -101,25 +145,73 @@ def create_api_app(
         key = _validate_public_key(req.public_key)
         sig = _validate_signature(req.signature)
         ip = _client_ip(request, config.trust_proxy)
+        
+        # Rate limit check with backoff
+        allowed, error = _rate_limiter.check_verify(ip, key)
+        if not allowed:
+            await audit.log_event(
+                db, "verify_rate_limit", ip, key, key[:16],
+                {"reason": error}, "warning", Path(config.audit_log)
+            )
+            raise HTTPException(status_code=429, detail=error)
+        
         if abs(time.time() - req.timestamp) > CLOCK_SKEW:
+            _rate_limiter.record_verify_failure(ip, key)
+            await audit.log_event(
+                db, "verify_failure", ip, key, key[:16],
+                {"reason": "timestamp not fresh"}, "warning", Path(config.audit_log)
+            )
             raise HTTPException(status_code=401, detail="timestamp not fresh")
+        
         device = await dblib.get_device(db, key)
         if device is None:
+            _rate_limiter.record_verify_failure(ip, key)
+            await audit.log_event(
+                db, "verify_failure", ip, key, key[:16],
+                {"reason": "device not registered"}, "warning", Path(config.audit_log)
+            )
             raise HTTPException(status_code=404, detail="device not registered")
+        
         if dblib.effective_status(device, ip) != "approved":
+            _rate_limiter.record_verify_failure(ip, key)
+            await audit.log_event(
+                db, "verify_failure", ip, key, key[:16],
+                {"reason": "device not approved for this IP", "device_status": device["status"]},
+                "warning", Path(config.audit_log)
+            )
             raise HTTPException(
                 status_code=403, detail="device not approved for this IP"
             )
+        
         nonce = auth.consume_nonce(key)
         if nonce is None:
+            _rate_limiter.record_verify_failure(ip, key)
+            await audit.log_event(
+                db, "verify_failure", ip, key, key[:16],
+                {"reason": "no active challenge or expired"}, "warning", Path(config.audit_log)
+            )
             raise HTTPException(status_code=401, detail="no active challenge or expired")
+        
         message = (nonce + key + str(req.timestamp)).encode()
         try:
             public_key_obj = Ed25519PublicKey.from_public_bytes(bytes.fromhex(key))
             public_key_obj.verify(bytes.fromhex(sig), message)
         except Exception:
+            _rate_limiter.record_verify_failure(ip, key)
+            await audit.log_event(
+                db, "verify_failure", ip, key, key[:16],
+                {"reason": "invalid signature"}, "warning", Path(config.audit_log)
+            )
             raise HTTPException(status_code=401, detail="invalid signature")
+        
         token, ttl = auth.issue_token(key, ip)
+        _rate_limiter.record_verify_success(ip, key)
+        
+        await audit.log_event(
+            db, "verify_success", ip, key, key[:16],
+            {"token_ttl": ttl}, "info", Path(config.audit_log)
+        )
+        
         return {
             "session_token": token,
             "expires_in": ttl,
@@ -130,19 +222,50 @@ def create_api_app(
     async def fetch(request: Request):
         token = _bearer_token(request)
         if token is None:
+            await audit.log_event(
+                db, "fetch_failure", _client_ip(request, config.trust_proxy),
+                None, None, {"reason": "missing bearer token"}, "warning", Path(config.audit_log)
+            )
             raise HTTPException(status_code=401, detail="missing bearer token")
+        
         ip = _client_ip(request, config.trust_proxy)
         public_key = auth.verify_token(token, ip)
         if public_key is None:
+            await audit.log_event(
+                db, "fetch_failure", ip, None, None,
+                {"reason": "invalid or expired session token"}, "warning", Path(config.audit_log)
+            )
             raise HTTPException(status_code=401, detail="invalid or expired session token")
+        
         device = await dblib.get_device(db, public_key)
         if device is None:
+            await audit.log_event(
+                db, "fetch_failure", ip, public_key, public_key[:16],
+                {"reason": "invalid session"}, "warning", Path(config.audit_log)
+            )
             raise HTTPException(status_code=401, detail="invalid session")
+        
         if dblib.effective_status(device, ip) != "approved":
+            await audit.log_event(
+                db, "fetch_failure", ip, public_key, public_key[:16],
+                {"reason": "device not approved for this IP"}, "warning", Path(config.audit_log)
+            )
             raise HTTPException(status_code=403, detail="device not approved for this IP")
+        
         creds, error = vault.load_storage(config.toml, master_key)
         if error:
+            await audit.log_event(
+                db, "fetch_failure", ip, public_key, public_key[:16],
+                {"reason": "storage config error", "error": error}, "error", Path(config.audit_log)
+            )
             raise HTTPException(status_code=503, detail=error)
+        
+        await audit.log_event(
+            db, "fetch_success", ip, public_key, public_key[:16],
+            {"backend_type": creds.get("backend", {}).get("type", "unknown")},
+            "info", Path(config.audit_log)
+        )
+        
         return {**creds, "device_id": public_key[:16]}
 
     return app
@@ -228,10 +351,18 @@ def _s3_from_form(form, existing: dict | None) -> dict:
     if not secret_access_key:
         raise HTTPException(status_code=400, detail="secret access key is required")
     region = str(form.get("region", "")).strip() or None
-    session_token = str(form.get("session_token", "")).strip() or None
+    session_token = str(form.get("session_token", "")).strip() or _existing_value(existing, "session_token") or None
     path_style = form.get("path_style") is not None
     root = str(form.get("root", "")).strip() or None
     ca_cert = str(form.get("ca_cert", "")).strip() or _existing_value(existing, "ca_cert") or None
+    multipart_threshold = str(form.get("multipart_threshold_bytes", "")).strip()
+    multipart_threshold_bytes = None
+    if multipart_threshold:
+        try:
+            multipart_threshold_bytes = int(multipart_threshold)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="multipart threshold must be an integer (bytes)")
+    immutable_naming = form.get("immutable_naming") is not None
     return {
         "version": 1,
         "backend": {
@@ -245,6 +376,8 @@ def _s3_from_form(form, existing: dict | None) -> dict:
             "session_token": session_token,
             "root": root,
             "ca_cert": ca_cert,
+            "multipart_threshold_bytes": multipart_threshold_bytes,
+            "immutable_naming": immutable_naming,
         },
     }
 
@@ -255,7 +388,7 @@ def create_ui_app(
     auth: AuthStore,
     master_key: bytes | None,
 ) -> FastAPI:
-    app = FastAPI(title="ExifFlow Relay UI")
+    app = FastAPI(title="ExifFlow Broker UI")
 
     @app.get("/", response_class=HTMLResponse)
     async def dashboard(request: Request):
@@ -292,7 +425,7 @@ def create_ui_app(
                 "storage.html",
                 {
                     "creds": _storage_view(creds),
-                    "error": "RELAY_MASTER_KEY (or file) missing — set it and restart the relay",
+                    "error": "BROKER_MASTER_KEY (or file) missing — set it and restart the broker",
                     "notice": None, "config_toml": config.toml,
                 },
             )
@@ -312,6 +445,15 @@ def create_ui_app(
             {"creds": _storage_view({}), "error": None, "notice": "storage config cleared", "config_toml": config.toml},
         )
 
+    @app.get("/dashboard/audit", response_class=HTMLResponse)
+    async def audit_log_page(request: Request, limit: int = 100, event_type: str = None, ip: str = None):
+        entries = await audit.get_audit_log(db, limit=limit, event_type=event_type, ip=ip)
+        return TEMPLATES.TemplateResponse(
+            request,
+            "audit.html",
+            {"entries": entries, "limit": limit, "event_type": event_type, "ip": ip, "audit_log_file": config.audit_log},
+        )
+
     @app.get("/dashboard/table", response_class=HTMLResponse)
     async def dashboard_table(request: Request):
         devices = await dblib.get_devices(db)
@@ -327,6 +469,12 @@ def create_ui_app(
         if device is None:
             raise HTTPException(status_code=404, detail="device not found")
         device = await dblib.approve_ip(db, device["public_key"], device["ip"])
+        
+        await audit.log_event(
+            db, "device_approve", device["ip"], device["public_key"], device["public_key"][:16],
+            {"source": "dashboard"}, "info", Path(config.audit_log)
+        )
+        
         return TEMPLATES.TemplateResponse(
             request,
             "partials/device_row.html",
@@ -340,6 +488,12 @@ def create_ui_app(
             raise HTTPException(status_code=404, detail="device not found")
         device = await dblib.deauthorize_device(db, device["public_key"])
         auth.revoke_public_key(device["public_key"])
+        
+        await audit.log_event(
+            db, "device_deauthorize", device["ip"], device["public_key"], device["public_key"][:16],
+            {"source": "dashboard"}, "warning", Path(config.audit_log)
+        )
+        
         return TEMPLATES.TemplateResponse(
             request,
             "partials/device_row.html",
@@ -351,6 +505,12 @@ def create_ui_app(
         device = await dblib.get_device_by_id(db, device_id)
         if device is None:
             raise HTTPException(status_code=404, detail="device not found")
+        
+        await audit.log_event(
+            db, "device_delete", device["ip"], device["public_key"], device["public_key"][:16],
+            {"source": "dashboard"}, "warning", Path(config.audit_log)
+        )
+        
         await dblib.delete_device(db, device["public_key"])
         auth.revoke_public_key(device["public_key"])
         return HTMLResponse("")

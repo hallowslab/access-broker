@@ -1,1 +1,0 @@
-"""ExifFlow Relay — authorization gateway."""
