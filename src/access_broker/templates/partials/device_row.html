@@ -19,6 +19,16 @@
   <td>{{ d.last_seen }}</td>
   <td>{{ d.created_at }}</td>
   <td>
+    <form style="display:inline" method="post" action="/dashboard/devices/{{ d.id }}/assign-config">
+      <select name="storage_config_id" onchange="this.form.submit()">
+        <option value="" {% if d.storage_config_id is none %}selected{% endif %}>— no config —</option>
+        {% for c in configs %}
+        <option value="{{ c.id }}" {% if d.storage_config_id == c.id %}selected{% endif %}>{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </form>
+  </td>
+  <td>
     {% if d.status != "deauthorized" and d.ip not in d.approved_ips %}
     <button class="btn ok" hx-post="/dashboard/devices/{{ d.id }}/approve"
             hx-target="#row-{{ d.id }}" hx-swap="outerHTML">Approve</button>

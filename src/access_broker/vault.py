@@ -31,6 +31,20 @@ def write_storage(toml_path: str, master_key: bytes, creds: dict) -> None:
     path.write_text(f'[storage]\nencrypted = "{token}"\n')
 
 
+def encrypt_config(creds: dict, master_key: bytes) -> str:
+    return Fernet(master_key).encrypt(json.dumps(creds).encode()).decode()
+
+
+def decrypt_config(token: str, master_key: bytes | None) -> tuple[dict | None, str | None]:
+    if master_key is None:
+        return None, "BROKER_MASTER_KEY (or BROKER_MASTER_KEY_FILE) missing"
+    try:
+        creds = json.loads(Fernet(master_key).decrypt(token.encode()))
+    except (InvalidToken, ValueError):
+        return None, "cannot decrypt storage config (bad master key?)"
+    return creds, None
+
+
 def load_storage(toml_path: str, master_key: bytes | None) -> tuple[dict | None, str | None]:
     path = Path(toml_path)
     if not path.exists():

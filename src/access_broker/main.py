@@ -14,7 +14,7 @@ from . import db as dblib
 from . import vault
 from .auth import AuthStore
 from .config import Config, load_config
-from .models import ChallengeRequest, RegisterRequest, VerifyRequest, to_view
+from .models import ChallengeRequest, RegisterRequest, VerifyRequest, to_view, to_storage_config_view
 from .ratelimit import RateLimiter, RateLimitConfig
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -251,21 +251,30 @@ def create_api_app(
                 {"reason": "device not approved for this IP"}, "warning", Path(config.audit_log)
             )
             raise HTTPException(status_code=403, detail="device not approved for this IP")
-        
-        creds, error = vault.load_storage(config.toml, master_key)
-        if error:
+
+        storage_config = await dblib.get_storage_config_for_device(db, public_key)
+        if storage_config is None:
             await audit.log_event(
                 db, "fetch_failure", ip, public_key, public_key[:16],
-                {"reason": "storage config error", "error": error}, "error", Path(config.audit_log)
+                {"reason": "no storage config assigned to this device"}, "error", Path(config.audit_log)
             )
-            raise HTTPException(status_code=503, detail=error)
-        
+            raise HTTPException(status_code=503, detail="no storage config assigned to this device")
+
+        creds, error = vault.decrypt_config(storage_config["encrypted"], master_key)
+        if error or creds is None:
+            await audit.log_event(
+                db, "fetch_failure", ip, public_key, public_key[:16],
+                {"reason": error or "storage config decrypt error"}, "error", Path(config.audit_log)
+            )
+            raise HTTPException(status_code=503, detail=error or "storage config error")
+
         await audit.log_event(
             db, "fetch_success", ip, public_key, public_key[:16],
-            {"backend_type": creds.get("backend", {}).get("type", "unknown")},
+            {"backend_type": creds.get("backend", {}).get("type", "unknown"),
+             "config_name": storage_config["name"]},
             "info", Path(config.audit_log)
         )
-        
+
         return {**creds, "device_id": public_key[:16]}
 
     return app
@@ -382,6 +391,27 @@ def _s3_from_form(form, existing: dict | None) -> dict:
     }
 
 
+def _creds_from_form(form, existing: dict | None) -> dict | str:
+    backend = str(form.get("backend", "ftps")).strip().lower()
+    try:
+        if backend == "ftps":
+            return _ftps_from_form(form, existing)
+        if backend == "s3":
+            return _s3_from_form(form, existing)
+    except HTTPException as exc:
+        return str(exc.detail)
+    return "backend must be ftps or s3"
+
+
+def _config_backend_type(config_row: dict, master_key: bytes | None) -> str:
+    if master_key is None:
+        return "unknown"
+    creds, error = vault.decrypt_config(config_row["encrypted"], master_key)
+    if error or creds is None:
+        return "unknown"
+    return creds.get("backend", {}).get("type", "unknown")
+
+
 def create_ui_app(
     config: Config,
     db: aiosqlite.Connection,
@@ -390,60 +420,139 @@ def create_ui_app(
 ) -> FastAPI:
     app = FastAPI(title="ExifFlow Broker UI")
 
+    async def _configs_error(request: Request, message: str):
+        configs = await dblib.list_storage_configs(db)
+        views = []
+        for c in configs:
+            view = to_storage_config_view(c)
+            view.backend_type = _config_backend_type(c, master_key)
+            views.append(view)
+        return TEMPLATES.TemplateResponse(
+            request,
+            "storage_configs.html",
+            {"configs": views, "error": message, "notice": None},
+        )
+
+    async def _configs_success(request: Request, message: str):
+        configs = await dblib.list_storage_configs(db)
+        views = []
+        for c in configs:
+            view = to_storage_config_view(c)
+            view.backend_type = _config_backend_type(c, master_key)
+            views.append(view)
+        return TEMPLATES.TemplateResponse(
+            request,
+            "storage_configs.html",
+            {"configs": views, "error": None, "notice": message},
+        )
+
+    async def _device_row_response(request: Request, device: dict):
+        configs = await dblib.list_storage_configs(db)
+        return TEMPLATES.TemplateResponse(
+            request,
+            "partials/device_row.html",
+            {
+                "d": to_view(device),
+                "configs": [to_storage_config_view(c) for c in configs],
+            },
+        )
+
     @app.get("/", response_class=HTMLResponse)
     async def dashboard(request: Request):
         devices = await dblib.get_devices(db)
+        configs = await dblib.list_storage_configs(db)
         return TEMPLATES.TemplateResponse(
             request,
             "dashboard.html",
-            {"devices": [to_view(d) for d in devices], "counts": _counts(devices)},
+            {
+                "devices": [to_view(d) for d in devices],
+                "counts": _counts(devices),
+                "configs": [to_storage_config_view(c) for c in configs],
+            },
         )
 
-    @app.get("/dashboard/storage", response_class=HTMLResponse)
-    async def storage_page(request: Request):
-        creds, error = vault.load_storage(config.toml, master_key)
+    @app.get("/dashboard/storage-configs", response_class=HTMLResponse)
+    async def storage_configs_page(request: Request):
+        configs = await dblib.list_storage_configs(db)
+        views = []
+        for c in configs:
+            view = to_storage_config_view(c)
+            view.backend_type = _config_backend_type(c, master_key)
+            views.append(view)
         return TEMPLATES.TemplateResponse(
             request,
-            "storage.html",
-            {"creds": _storage_view(creds), "error": error, "notice": None, "config_toml": config.toml},
+            "storage_configs.html",
+            {"configs": views, "error": None, "notice": None},
         )
 
-    @app.post("/dashboard/storage", response_class=HTMLResponse)
-    async def storage_save(request: Request):
+    @app.post("/dashboard/storage-configs", response_class=HTMLResponse)
+    async def storage_config_create(request: Request):
         form = await request.form()
-        backend = str(form.get("backend", "ftps")).strip().lower()
-        existing, _ = vault.load_storage(config.toml, master_key)
-        if backend == "ftps":
-            creds = _ftps_from_form(form, existing)
-        elif backend == "s3":
-            creds = _s3_from_form(form, existing)
-        else:
-            raise HTTPException(status_code=400, detail="backend must be ftps or s3")
+        name = str(form.get("name", "")).strip()
+        if not name or any(ch.isspace() for ch in name):
+            return await _configs_error(request, "config name is required and must not contain spaces")
+        if await dblib.get_storage_config_by_name(db, name) is not None:
+            return await _configs_error(request, f"config name '{name}' already exists")
         if master_key is None:
-            return TEMPLATES.TemplateResponse(
-                request,
-                "storage.html",
-                {
-                    "creds": _storage_view(creds),
-                    "error": "BROKER_MASTER_KEY (or file) missing — set it and restart the broker",
-                    "notice": None, "config_toml": config.toml,
-                },
-            )
-        vault.write_storage(config.toml, master_key, creds)
-        return TEMPLATES.TemplateResponse(
-            request,
-            "storage.html",
-            {"creds": _storage_view(creds), "error": None, "notice": "storage credentials saved", "config_toml": config.toml},
-        )
+            return await _configs_error(request, "BROKER_MASTER_KEY (or file) missing — set it and restart the broker")
+        creds = _creds_from_form(form, {})
+        if isinstance(creds, str):
+            return await _configs_error(request, creds)
+        encrypted = vault.encrypt_config(creds, master_key)
+        await dblib.create_storage_config(db, name, encrypted)
+        return await _configs_success(request, f"config '{name}' created")
 
-    @app.post("/dashboard/storage/clear", response_class=HTMLResponse)
-    async def storage_clear(request: Request):
-        vault.storage_clear(config.toml)
-        return TEMPLATES.TemplateResponse(
-            request,
-            "storage.html",
-            {"creds": _storage_view({}), "error": None, "notice": "storage config cleared", "config_toml": config.toml},
+    @app.post("/dashboard/storage-configs/{config_id}/update", response_class=HTMLResponse)
+    async def storage_config_update(request: Request, config_id: int):
+        existing = await dblib.get_storage_config(db, config_id)
+        if existing is None:
+            return await _configs_error(request, "config not found")
+        form = await request.form()
+        name = str(form.get("name", "")).strip()
+        if not name or any(ch.isspace() for ch in name):
+            return await _configs_error(request, "config name is required and must not contain spaces")
+        same_name = await dblib.get_storage_config_by_name(db, name)
+        if same_name is not None and same_name["id"] != config_id:
+            return await _configs_error(request, f"config name '{name}' already exists")
+        if master_key is None:
+            return await _configs_error(request, "BROKER_MASTER_KEY (or file) missing — set it and restart the broker")
+        existing_creds, _ = vault.decrypt_config(existing["encrypted"], master_key)
+        creds = _creds_from_form(form, existing_creds or {})
+        if isinstance(creds, str):
+            return await _configs_error(request, creds)
+        encrypted = vault.encrypt_config(creds, master_key)
+        await dblib.update_storage_config_encrypted(db, config_id, name, encrypted)
+        return await _configs_success(request, f"config '{name}' updated")
+
+    @app.post("/dashboard/storage-configs/{config_id}/delete", response_class=HTMLResponse)
+    async def storage_config_delete(request: Request, config_id: int):
+        existing = await dblib.get_storage_config(db, config_id)
+        if existing is None:
+            return await _configs_error(request, "config not found")
+        in_use = await dblib.storage_config_usage_count(db, config_id)
+        if in_use > 0:
+            return await _configs_error(
+                request, f"cannot delete '{existing['name']}': in use by {in_use} device(s)"
+            )
+        await dblib.delete_storage_config(db, config_id)
+        return await _configs_success(request, f"config '{existing['name']}' deleted")
+
+    @app.post("/dashboard/devices/{device_id}/assign-config", response_class=HTMLResponse)
+    async def ui_assign_config(request: Request, device_id: int):
+        device = await dblib.get_device_by_id(db, device_id)
+        if device is None:
+            raise HTTPException(status_code=404, detail="device not found")
+        form = await request.form()
+        raw = str(form.get("storage_config_id", "")).strip()
+        config_id = int(raw) if raw.isdigit() else None
+        if config_id is not None and await dblib.get_storage_config(db, config_id) is None:
+            raise HTTPException(status_code=404, detail="config not found")
+        device = await dblib.assign_storage_config(db, device_id, config_id)
+        await audit.log_event(
+            db, "device_assign_config", device["ip"], device["public_key"], device["public_key"][:16],
+            {"source": "dashboard", "storage_config_id": config_id}, "info", Path(config.audit_log)
         )
+        return await _device_row_response(request, device)
 
     @app.get("/dashboard/audit", response_class=HTMLResponse)
     async def audit_log_page(request: Request, limit: int = 100, event_type: str = None, ip: str = None):
@@ -457,10 +566,14 @@ def create_ui_app(
     @app.get("/dashboard/table", response_class=HTMLResponse)
     async def dashboard_table(request: Request):
         devices = await dblib.get_devices(db)
+        configs = await dblib.list_storage_configs(db)
         return TEMPLATES.TemplateResponse(
             request,
             "partials/device_table.html",
-            {"devices": [to_view(d) for d in devices]},
+            {
+                "devices": [to_view(d) for d in devices],
+                "configs": [to_storage_config_view(c) for c in configs],
+            },
         )
 
     @app.post("/dashboard/devices/{device_id}/approve", response_class=HTMLResponse)
@@ -475,11 +588,7 @@ def create_ui_app(
             {"source": "dashboard"}, "info", Path(config.audit_log)
         )
         
-        return TEMPLATES.TemplateResponse(
-            request,
-            "partials/device_row.html",
-            {"d": to_view(device)},
-        )
+        return await _device_row_response(request, device)
 
     @app.post("/dashboard/devices/{device_id}/deauthorize", response_class=HTMLResponse)
     async def ui_deauthorize(request: Request, device_id: int):
@@ -494,11 +603,7 @@ def create_ui_app(
             {"source": "dashboard"}, "warning", Path(config.audit_log)
         )
         
-        return TEMPLATES.TemplateResponse(
-            request,
-            "partials/device_row.html",
-            {"d": to_view(device)},
-        )
+        return await _device_row_response(request, device)
 
     @app.delete("/dashboard/devices/{device_id}", response_class=HTMLResponse)
     async def ui_delete(request: Request, device_id: int):
@@ -551,6 +656,22 @@ def _counts(devices: list[dict]) -> dict[str, int]:
     return {"pending": pending, "approved": approved, "total": len(devices)}
 
 
+async def _migrate_legacy_storage(
+    db: aiosqlite.Connection, config: Config, master_key: bytes | None
+) -> None:
+    existing_configs = await dblib.list_storage_configs(db)
+    if existing_configs:
+        return
+    if master_key is None:
+        return
+    creds, error = vault.load_storage(config.toml, master_key)
+    if error or creds is None:
+        return
+    encrypted = vault.encrypt_config(creds, master_key)
+    created = await dblib.create_storage_config(db, "default", encrypted)
+    await dblib.assign_storage_config_to_all(db, created["id"])
+
+
 async def _serve(config: Config) -> None:
     Path(config.db).parent.mkdir(parents=True, exist_ok=True)
     await dblib.init_db(config.db)
@@ -559,6 +680,7 @@ async def _serve(config: Config) -> None:
     auth = AuthStore()
     master_key = vault.load_master_key()
     try:
+        await _migrate_legacy_storage(db, config, master_key)
         servers = [
             uvicorn.Server(
                 uvicorn.Config(

@@ -1,0 +1,93 @@
+{% set c = creds | default({}) %}
+<label>Backend
+  <select name="backend" class="backend-select">
+    <option value="ftps" {% if c.backend_type == "ftps" %}selected{% endif %}>FTPS</option>
+    <option value="s3" {% if c.backend_type == "s3" %}selected{% endif %}>S3</option>
+  </select>
+</label>
+
+<fieldset class="ftps-fields">
+  <legend>FTPS</legend>
+  <label>Protocol
+    <select name="protocol">
+      <option value="ftp" {% if c.protocol == "ftp" %}selected{% endif %}>FTP</option>
+      <option value="ftps" {% if c.protocol == "ftps" or c.backend_type == "ftps" %}selected{% endif %}>FTPS</option>
+    </select>
+  </label>
+  <label>Host
+    <input type="text" name="host" value="{{ c.host | default('') }}">
+  </label>
+  <label>Port
+    <input type="number" name="port" value="{{ c.port | default('') }}">
+  </label>
+  <label>User
+    <input type="text" name="user" value="{{ c.user | default('') }}">
+  </label>
+  <label>Password
+    <input type="password" name="password" placeholder="blank = unchanged">
+  </label>
+</fieldset>
+
+<fieldset class="s3-fields" style="display:none">
+  <legend>S3</legend>
+  <label>Endpoint
+    <input type="text" name="endpoint" value="{{ c.endpoint | default('') }}" placeholder="https://s3.example.com">
+  </label>
+  <label>Region (optional)
+    <input type="text" name="region" value="{{ c.region | default('') }}">
+  </label>
+  <label>Bucket
+    <input type="text" name="bucket" value="{{ c.bucket | default('') }}">
+  </label>
+  <label class="check">
+    <input type="checkbox" name="path_style" {% if c.path_style != False %}checked{% endif %}>
+    Path-style endpoint
+  </label>
+  <label>Access key ID
+    <input type="text" name="access_key_id" value="{{ c.access_key_id | default('') }}">
+  </label>
+  <label>Secret access key
+    <input type="password" name="secret_access_key" placeholder="blank = unchanged">
+  </label>
+  <label>Session token (optional)
+    <input type="password" name="session_token" placeholder="blank = unchanged">
+  </label>
+  <label>Multipart threshold (bytes, optional)
+    <input type="number" name="multipart_threshold_bytes" min="5242880" step="1048576"
+           value="{{ c.multipart_threshold_bytes | default('') }}">
+  </label>
+  <label class="check">
+    <input type="checkbox" name="immutable_naming" {% if c.immutable_naming %}checked{% endif %}>
+    Immutable naming
+  </label>
+</fieldset>
+
+<label>Root / object prefix (optional)
+  <input type="text" name="root" value="{{ c.root | default('') }}">
+</label>
+<label>CA cert PEM (self-signed trust, optional)
+  <textarea name="ca_cert" rows="4" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----">{{ c.ca_cert | default('') }}</textarea>
+</label>
+
+<script>
+(function () {
+  var form = document.currentScript.closest("form");
+  var sel = form.querySelector(".backend-select");
+  var ftps = form.querySelector(".ftps-fields");
+  var s3 = form.querySelector(".s3-fields");
+  function setDisabled(fieldset, disabled) {
+    fieldset.querySelectorAll("input, select, textarea").forEach(function (el) {
+      el.disabled = disabled;
+    });
+  }
+  function toggle() {
+    var isS3 = sel.value === "s3";
+    ftps.style.display = isS3 ? "none" : "";
+    s3.style.display = isS3 ? "" : "none";
+    setDisabled(ftps, isS3);
+    setDisabled(s3, !isS3);
+  }
+  sel.addEventListener("change", toggle);
+  toggle();
+})();
+</script>

@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Access Broker — Storage Configs{% endblock %}
+{% block content %}
+<h1>Storage configs</h1>
+<p class="counts"><a href="/">← devices</a></p>
+
+{% if error %}<p class="notice err">{{ error }}</p>{% endif %}
+{% if notice %}<p class="notice ok">{{ notice }}</p>{% endif %}
+
+<table>
+  <thead>
+    <tr><th>Name</th><th>Backend</th><th>In use</th><th>Updated</th><th>Actions</th></tr>
+  </thead>
+  <tbody>
+    {% for c in configs %}
+    <tr>
+      <td><strong>{{ c.name }}</strong></td>
+      <td>{{ c.backend_type }}</td>
+      <td>{{ c.in_use }}</td>
+      <td>{{ c.updated_at }}</td>
+      <td>
+        <details>
+          <summary style="cursor:pointer">Edit</summary>
+          <div style="padding:.5rem 0">
+            <form method="post" action="/dashboard/storage-configs/{{ c.id }}/update" class="cred-form">
+              {% include "partials/storage_form.html" with context %}
+              <input type="hidden" name="name" value="{{ c.name }}">
+              <button class="btn ok" type="submit">Save</button>
+            </form>
+          </div>
+        </details>
+        {% if c.in_use == 0 %}
+        <button class="btn danger" hx-post="/dashboard/storage-configs/{{ c.id }}/delete"
+                hx-target="body" hx-swap="outerHTML"
+                hx-confirm="Delete config '{{ c.name }}'?">Delete</button>
+        {% else %}
+        <span class="hint">in use</span>
+        {% endif %}
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5" class="empty">No storage configs defined.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h2 style="margin-top:2rem">New config</h2>
+<form method="post" action="/dashboard/storage-configs" class="cred-form">
+  <label>Name (letters/digits, no spaces)
+    <input type="text" name="name" value="" required>
+  </label>
+  {% include "partials/storage_form.html" with context %}
+  <button class="btn ok" type="submit">Create</button>
+</form>
+{% endblock %}
