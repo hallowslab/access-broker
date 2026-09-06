@@ -22,8 +22,9 @@
         <details>
           <summary style="cursor:pointer">Edit</summary>
           <div style="padding:.5rem 0">
+            {% set creds = c.creds %}
             <form method="post" action="/dashboard/storage-configs/{{ c.id }}/update" class="cred-form">
-              {% include "partials/storage_form.html" with context %}
+              {% include "partials/storage_form.html" %}
               <input type="hidden" name="name" value="{{ c.name }}">
               <button class="btn ok" type="submit">Save</button>
             </form>

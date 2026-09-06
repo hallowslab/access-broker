@@ -412,6 +412,22 @@ def _config_backend_type(config_row: dict, master_key: bytes | None) -> str:
     return creds.get("backend", {}).get("type", "unknown")
 
 
+def _config_row(config_row: dict, master_key: bytes | None) -> dict:
+    creds, error = vault.decrypt_config(config_row["encrypted"], master_key) if config_row.get("encrypted") else (None, None)
+    view = _storage_view(creds) if not error else _storage_view(None)
+    for secret in ("password", "secret_access_key", "session_token"):
+        if secret in view:
+            view[secret] = ""
+    return {
+        "id": config_row["id"],
+        "name": config_row["name"],
+        "backend_type": _config_backend_type(config_row, master_key),
+        "in_use": config_row.get("in_use", 0),
+        "updated_at": config_row["updated_at"],
+        "creds": view,
+    }
+
+
 def create_ui_app(
     config: Config,
     db: aiosqlite.Connection,
@@ -422,28 +438,18 @@ def create_ui_app(
 
     async def _configs_error(request: Request, message: str):
         configs = await dblib.list_storage_configs(db)
-        views = []
-        for c in configs:
-            view = to_storage_config_view(c)
-            view.backend_type = _config_backend_type(c, master_key)
-            views.append(view)
         return TEMPLATES.TemplateResponse(
             request,
             "storage_configs.html",
-            {"configs": views, "error": message, "notice": None},
+            {"configs": [_config_row(c, master_key) for c in configs], "error": message, "notice": None},
         )
 
     async def _configs_success(request: Request, message: str):
         configs = await dblib.list_storage_configs(db)
-        views = []
-        for c in configs:
-            view = to_storage_config_view(c)
-            view.backend_type = _config_backend_type(c, master_key)
-            views.append(view)
         return TEMPLATES.TemplateResponse(
             request,
             "storage_configs.html",
-            {"configs": views, "error": None, "notice": message},
+            {"configs": [_config_row(c, master_key) for c in configs], "error": None, "notice": message},
         )
 
     async def _device_row_response(request: Request, device: dict):
@@ -474,15 +480,10 @@ def create_ui_app(
     @app.get("/dashboard/storage-configs", response_class=HTMLResponse)
     async def storage_configs_page(request: Request):
         configs = await dblib.list_storage_configs(db)
-        views = []
-        for c in configs:
-            view = to_storage_config_view(c)
-            view.backend_type = _config_backend_type(c, master_key)
-            views.append(view)
         return TEMPLATES.TemplateResponse(
             request,
             "storage_configs.html",
-            {"configs": views, "error": None, "notice": None},
+            {"configs": [_config_row(c, master_key) for c in configs], "error": None, "notice": None},
         )
 
     @app.post("/dashboard/storage-configs", response_class=HTMLResponse)
