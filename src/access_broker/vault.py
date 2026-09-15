@@ -69,7 +69,7 @@ def storage_set(toml_path: str) -> None:
     master_key = load_master_key()
     if master_key is None:
         sys.exit(
-            "no master key set — set BROKER_MASTER_KEY or BROKER_MASTER_KEY_FILE "
+            "no master key set - set BROKER_MASTER_KEY or BROKER_MASTER_KEY_FILE "
             "(generate one with: access-broker keygen)"
         )
     backend = input("backend (ftps/s3) [ftps]: ").strip().lower() or "ftps"
@@ -87,7 +87,7 @@ def storage_set_from_json(toml_path: str, data_path: str) -> None:
     master_key = load_master_key()
     if master_key is None:
         sys.exit(
-            "no master key set — set BROKER_MASTER_KEY or BROKER_MASTER_KEY_FILE "
+            "no master key set - set BROKER_MASTER_KEY or BROKER_MASTER_KEY_FILE "
             "(generate one with: access-broker keygen)"
         )
     try:

@@ -495,7 +495,7 @@ def create_ui_app(
         if await dblib.get_storage_config_by_name(db, name) is not None:
             return await _configs_error(request, f"config name '{name}' already exists")
         if master_key is None:
-            return await _configs_error(request, "BROKER_MASTER_KEY (or file) missing — set it and restart the broker")
+            return await _configs_error(request, "BROKER_MASTER_KEY (or file) missing - set it and restart the broker")
         creds = _creds_from_form(form, {})
         if isinstance(creds, str):
             return await _configs_error(request, creds)
@@ -516,7 +516,7 @@ def create_ui_app(
         if same_name is not None and same_name["id"] != config_id:
             return await _configs_error(request, f"config name '{name}' already exists")
         if master_key is None:
-            return await _configs_error(request, "BROKER_MASTER_KEY (or file) missing — set it and restart the broker")
+            return await _configs_error(request, "BROKER_MASTER_KEY (or file) missing - set it and restart the broker")
         existing_creds, _ = vault.decrypt_config(existing["encrypted"], master_key)
         creds = _creds_from_form(form, existing_creds or {})
         if isinstance(creds, str):

@@ -2,7 +2,7 @@
 
 Zero-trust replication gateway for the ExifFlow pipeline. Devices register
 with an Ed25519 key, an admin approves them on a dashboard, and approved
-devices fetch encrypted FTP/FTPS storage credentials at runtime — credentials
+devices fetch encrypted FTP/FTPS storage credentials at runtime - credentials
 are never stored on the client.
 
 Built with Python, FastAPI, SQLite (aiosqlite), and Jinja2/HTMX.
@@ -14,17 +14,17 @@ Built with Python, FastAPI, SQLite (aiosqlite), and Jinja2/HTMX.
 [ admin browser          ]   →  Broker UI     (127.0.0.1:8701)
 ```
 
-* **API app** — client-facing: `register`, `status` (long-poll), `challenge`,
+* **API app** - client-facing: `register`, `status` (long-poll), `challenge`,
   `verify`, `credentials/fetch`.
-* **UI app** — loopback-only dashboard: approve/deauthorize devices, set
+* **UI app** - loopback-only dashboard: approve/deauthorize devices, set
   storage credentials, view status.
-* **Storage vault** — FTP/FTPS target credentials encrypted (Fernet) with a
+* **Storage vault** - FTP/FTPS target credentials encrypted (Fernet) with a
   master key and stored in `data/access-broker.toml`.
 
 ## Prerequisites
 
 * Python 3.11+
-* [uv](https://docs.astral.sh/uv/) (recommended) — or plain `pip`
+* [uv](https://docs.astral.sh/uv/) (recommended) - or plain `pip`
 
 ## Setup
 
@@ -45,8 +45,8 @@ uv sync                # or: pip install -e .
 | `BROKER_UI_ENABLED` | `1` | Admin dashboard Enabled |
 | `BROKER_UI_HOST` | `127.0.0.1` | Admin dashboard Host |
 | `BROKER_UI_PORT` | `8701` | Admin dashboard Port |
-| `BROKER_MASTER_KEY` | — | Fernet key for encrypting storage credentials |
-| `BROKER_MASTER_KEY_FILE` | — | Alternative: path to a file containing the key |
+| `BROKER_MASTER_KEY` | - | Fernet key for encrypting storage credentials |
+| `BROKER_MASTER_KEY_FILE` | - | Alternative: path to a file containing the key |
 
 ### Generate the master key
 
@@ -65,7 +65,7 @@ uv run access-broker serve
 ```
 
 * API: `http://<host>:8700` (clients)
-* Dashboard: `http://127.0.0.1:8701/dashboard` (admin — loopback only)
+* Dashboard: `http://127.0.0.1:8701/dashboard` (admin - loopback only)
 
 ## Configure storage credentials
 
@@ -79,10 +79,10 @@ uv run access-broker storage clear
 ```
 
 Prompts: `protocol` (ftp/ftps), `host`, `port`, `user`, `password`, `root`
-(optional), and `ca cert PEM file` (optional — for trusting a self-signed
+(optional), and `ca cert PEM file` (optional - for trusting a self-signed
 FTPS target).
 
-> The CA cert is pasted in full PEM form. Verification is never disabled — the
+> The CA cert is pasted in full PEM form. Verification is never disabled - the
 > cert is added as a trusted root, and it must match the storage host via SAN
 > (use IP SANs when connecting by IP).
 
@@ -95,14 +95,14 @@ Once the broker is running:
 2. **app-gui**: set the broker URL + device name in
    **Settings → Replication (Broker)** and click **REGISTER DEVICE**. See
    [`../app-gui/README.md`](../app-gui/README.md).
-3. Approve the pending device in the dashboard — it then fetches the storage
+3. Approve the pending device in the dashboard - it then fetches the storage
    credentials on first upload.
 
 ## Design notes
 
 * Device identity is a per-device Ed25519 key that persists in the client
   config (`bg.json` / GUI settings).
-* Approval is per device **and IP** — the dashboard shows each device's
+* Approval is per device **and IP** - the dashboard shows each device's
   current IP and approves it for that address.
 * Credentials are fetched with a short-lived session token (challenge →
   Ed25519 signature → token) and held in client RAM only.

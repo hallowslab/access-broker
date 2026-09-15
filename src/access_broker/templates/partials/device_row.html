@@ -3,7 +3,7 @@
   <td>{{ d.device_info | tojson }}</td>
   <td>{{ d.ip }}</td>
   <td>
-    {{ d.approved_ips | join(", ") or "—" }}
+    {{ d.approved_ips | join(", ") or "-" }}
     {% if d.ip_history | length > 0 %}
     <details style="margin-top: 4px;">
       <summary style="cursor: pointer; font-size: 0.85em; color: #666;">IP History ({{ d.ip_history | length }})</summary>
@@ -23,7 +23,7 @@
             hx-post="/dashboard/devices/{{ d.id }}/assign-config"
             hx-target="#row-{{ d.id }}" hx-swap="outerHTML"
             hx-include="this">
-      <option value="" {% if d.storage_config_id is none %}selected{% endif %}>— no config —</option>
+      <option value="" {% if d.storage_config_id is none %}selected{% endif %}>- no config -</option>
       {% for c in configs %}
       <option value="{{ c.id }}" {% if d.storage_config_id == c.id %}selected{% endif %}>{{ c.name }}</option>
       {% endfor %}

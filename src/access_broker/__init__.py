@@ -1,1 +1,1 @@
-"""ExifFlow Access Broker — authorization gateway."""
+"""ExifFlow Access Broker - authorization gateway."""
