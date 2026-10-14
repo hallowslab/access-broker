@@ -59,9 +59,38 @@ def create_api_app(
 ) -> FastAPI:
     app = FastAPI(title="ExifFlow Broker API")
 
+    async def _require_public_key(request: Request, raw: str) -> str:
+        """Validate a public key, auditing malformed attempts (rate-capped)."""
+        ip = _client_ip(request, config.trust_proxy)
+        try:
+            return _validate_public_key(raw)
+        except HTTPException as exc:
+            # Cap per-IP so this can't be used to flood the audit log/DB.
+            if _rate_limiter.check_rate_limit(f"invalid:{ip}", 30):
+                await audit.log_event(
+                    db, "request_invalid", ip, None, None,
+                    {"field": "public_key", "reason": exc.detail, "value": (raw or "")[:64]},
+                    "warning", Path(config.audit_log),
+                )
+            raise
+
+    async def _require_signature(request: Request, raw: str) -> str:
+        """Validate a signature, auditing malformed attempts (rate-capped)."""
+        ip = _client_ip(request, config.trust_proxy)
+        try:
+            return _validate_signature(raw)
+        except HTTPException as exc:
+            if _rate_limiter.check_rate_limit(f"invalid:{ip}", 30):
+                await audit.log_event(
+                    db, "request_invalid", ip, None, None,
+                    {"field": "signature", "reason": exc.detail, "value": (raw or "")[:64]},
+                    "warning", Path(config.audit_log),
+                )
+            raise
+
     @app.post("/api/devices/register", status_code=201)
     async def register(req: RegisterRequest, request: Request):
-        key = _validate_public_key(req.public_key)
+        key = await _require_public_key(request, req.public_key)
         ip = _client_ip(request, config.trust_proxy)
         
         # Rate limit check
@@ -95,7 +124,7 @@ def create_api_app(
 
     @app.get("/api/devices/status")
     async def device_status(public_key: str, request: Request):
-        key = _validate_public_key(public_key)
+        key = await _require_public_key(request, public_key)
         ip = _client_ip(request, config.trust_proxy)
         device = await dblib.get_device(db, key)
         if device is None:
@@ -103,6 +132,9 @@ def create_api_app(
         deadline = time.monotonic() + LONG_POLL_TIMEOUT
         while time.monotonic() < deadline:
             device = await dblib.get_device(db, key)
+            # The device can be deleted mid-poll; do not deref None.
+            if device is None:
+                raise HTTPException(status_code=404, detail="device not registered")
             status = dblib.effective_status(device, ip)
             if status != "pending":
                 return _status_response(device, status, ip)
@@ -111,7 +143,7 @@ def create_api_app(
 
     @app.post("/api/auth/challenge", status_code=200)
     async def challenge(req: ChallengeRequest, request: Request):
-        key = _validate_public_key(req.public_key)
+        key = await _require_public_key(request, req.public_key)
         ip = _client_ip(request, config.trust_proxy)
         
         # Rate limit check
@@ -142,8 +174,8 @@ def create_api_app(
 
     @app.post("/api/auth/verify", status_code=200)
     async def verify(req: VerifyRequest, request: Request):
-        key = _validate_public_key(req.public_key)
-        sig = _validate_signature(req.signature)
+        key = await _require_public_key(request, req.public_key)
+        sig = await _require_signature(request, req.signature)
         ip = _client_ip(request, config.trust_proxy)
         
         # Rate limit check with backoff
@@ -623,7 +655,7 @@ def create_ui_app(
 
     @app.post("/admin/devices/approve", status_code=200)
     async def admin_approve(req: RegisterRequest, request: Request):
-        key = _validate_public_key(req.public_key)
+        key = await _require_public_key(request, req.public_key)
         ip = _client_ip(request, config.trust_proxy)
         device = await dblib.approve_ip(db, key, ip)
         if device is None:
@@ -632,7 +664,7 @@ def create_ui_app(
 
     @app.post("/admin/devices/deauthorize", status_code=200)
     async def admin_deauthorize(req: RegisterRequest, request: Request):
-        key = _validate_public_key(req.public_key)
+        key = await _require_public_key(request, req.public_key)
         device = await dblib.deauthorize_device(db, key)
         if device is None:
             raise HTTPException(status_code=404, detail="device not registered")
@@ -642,7 +674,7 @@ def create_ui_app(
 
     @app.delete("/admin/devices/{public_key}", status_code=200)
     async def admin_delete(public_key: str, request: Request):
-        key = _validate_public_key(public_key)
+        key = await _require_public_key(request, public_key)
         if not await dblib.delete_device(db, key):
             raise HTTPException(status_code=404, detail="device not registered")
         auth.revoke_public_key(key)
